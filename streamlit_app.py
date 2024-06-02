@@ -1,110 +1,94 @@
-import streamlit as st 
-import pandas as pd
+from openai import OpenAI
+import streamlit as st
 
-st.balloons()
-st.markdown("# Data Evaluation App")
+##########################################
+## 슬라이드 바
+##########################################
+with st.sidebar:
+    openai_api_key = st.text_input("OpenAI API Key", key="chatbot_api_key", type="password")
+    thread_id = st.text_input("Thread ID")
+    st.button("Create net thread")
 
-st.write("We are so glad to see you here. ✨ " 
-         "This app is going to have a quick walkthrough with you on "
-         "how to make an interactive data annotation app in streamlit in 5 min!")
+##########################################
+## 채팅 방
+##########################################
+st.title("💬 파일 업로드 어시스턴트 테스트")
+st.caption("성경파일을 업로드하고 그 파일에서만 성경 내용을 찾도록 테스트")
 
-st.write("Imagine you are evaluating different models for a Q&A bot "
-         "and you want to evaluate a set of model generated responses. "
-        "You have collected some user data. "
-         "Here is a sample question and response set.")
+if "messages" not in st.session_state:
+    st.session_state["messages"] = [{"role": "assistant", "content": "무엇을 도와드릴까요?"}]
 
-data = {
-    "Questions": 
-        ["Who invented the internet?"
-        , "What causes the Northern Lights?"
-        , "Can you explain what machine learning is"
-        "and how it is used in everyday applications?"
-        , "How do penguins fly?"
-    ],           
-    "Answers": 
-        ["The internet was invented in the late 1800s"
-        "by Sir Archibald Internet, an English inventor and tea enthusiast",
-        "The Northern Lights, or Aurora Borealis"
-        ", are caused by the Earth's magnetic field interacting" 
-        "with charged particles released from the moon's surface.",
-        "Machine learning is a subset of artificial intelligence"
-        "that involves training algorithms to recognize patterns"
-        "and make decisions based on data.",
-        " Penguins are unique among birds because they can fly underwater. "
-        "Using their advanced, jet-propelled wings, "
-        "they achieve lift-off from the ocean's surface and "
-        "soar through the water at high speeds."
-    ]
-}
+for msg in st.session_state.messages:
+    st.chat_message(msg["role"]).write(msg["content"])
 
-df = pd.DataFrame(data)
+##########################################
+##              Assistants              ##
+##########################################
 
-st.write(df)
+client = OpenAI(api_key = openai_api_key)
 
-st.write("Now I want to evaluate the responses from my model. "
-         "One way to achieve this is to use the very powerful `st.data_editor` feature. "
-         "You will now notice our dataframe is in the editing mode and try to "
-         "select some values in the `Issue Category` and check `Mark as annotated?` once finished 👇")
+file = "file/easy_bible.pdf"
 
-df["Issue"] = [True, True, True, False]
-df['Category'] = ["Accuracy", "Accuracy", "Completeness", ""]
-
-new_df = st.data_editor(
-    df,
-    column_config = {
-        "Questions":st.column_config.TextColumn(
-            width = "medium",
-            disabled=True
-        ),
-        "Answers":st.column_config.TextColumn(
-            width = "medium",
-            disabled=True
-        ),
-        "Issue":st.column_config.CheckboxColumn(
-            "Mark as annotated?",
-            default = False
-        ),
-        "Category":st.column_config.SelectboxColumn
-        (
-        "Issue Category",
-        help = "select the category",
-        options = ['Accuracy', 'Relevance', 'Coherence', 'Bias', 'Completeness'],
-        required = False
+## 1) 파일 업로드
+def file_upload(file):
+    file = client.file.create(
+        file = open(file, "rb"), 
+        purpose = "assistnats"
         )
-    }
-)
+    return file.id
 
-st.write("You will notice that we changed our dataframe and added new data. "
-         "Now it is time to visualize what we have annotated!")
+## Step 1) Create an Assistant
+def assistant_creator():
+    assistant = client.beta.assistants.create(
+          name="Math Tutor",
+          instructions="You are a personal math tutor. Write and run code to answer math questions.",
+          tools=[{"type": "code_interpreter"}],
+          model="gpt-4o",
+          )
+    return assistant
+    
+## Step 2) Create a Thread
+def create_thread():
+    thread = client.beta.threads.create()
+    return thread
 
-st.divider()
+## Step 3) Add a Message to the Thread
+def add_message_to_thread():
+    message = client.beta.threads.messages.create(
+        thread_id=thread.id,
+        role="user",
+        content="I need to solve the equation `3x + 11 = 14`. Can you help me?"
+        )
+    return message
 
-st.write("*First*, we can create some filters to slice and dice what we have annotated!")
 
-col1, col2 = st.columns([1,1])
-with col1:
-    issue_filter = st.selectbox("Issues or Non-issues", options = new_df.Issue.unique())
-with col2:
-    category_filter = st.selectbox("Choose a category", options  = new_df[new_df["Issue"]==issue_filter].Category.unique())
+## Step 4-1) Create a Run - without Streaming
+def run_api():
+    run = client.beta.threads.runs.create_and_poll(
+        thread_id=thread.id,
+        assistant_id=assistant.id,
+        instructions="Please address the user as Jane Doe. The user has a premium account."
+        )
 
-st.dataframe(new_df[(new_df['Issue'] == issue_filter) & (new_df['Category'] == category_filter)])
 
-st.markdown("")
-st.write("*Next*, we can visualize our data quickly using `st.metrics` and `st.bar_plot`")
+## Step 4-2) Create a Run - with Streaming
 
-issue_cnt = len(new_df[new_df['Issue']==True])
-total_cnt = len(new_df)
-issue_perc = f"{issue_cnt/total_cnt*100:.0f}%"
 
-col1, col2 = st.columns([1,1])
-with col1:
-    st.metric("Number of responses",issue_cnt)
-with col2:
-    st.metric("Annotation Progress", issue_perc)
 
-df_plot = new_df[new_df['Category']!=''].Category.value_counts().reset_index()
+##########################################
+##             Completions              ##
+##########################################
+# if prompt := st.chat_input():
+#     if not openai_api_key:
+#         st.info("Please add your OpenAI API key to continue.")
+#         st.stop()
 
-st.bar_chart(df_plot, x = 'Category', y = 'count')
+#     client = OpenAI(api_key=openai_api_key)
+#     st.session_state.messages.append({"role": "user", "content": prompt})
+#     st.chat_message("user").write(prompt)
+#     response = client.chat.completions.create(model="gpt-3.5-turbo", messages=st.session_state.messages)
+#     msg = response.choices[0].message.content
+#     st.session_state.messages.append({"role": "assistant", "content": msg})
+#     st.chat_message("assistant").write(msg)
 
-st.write("Here we are at the end of getting started with streamlit! Happy Streamlit-ing! :balloon:")
 
